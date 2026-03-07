@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HRM House Hunt Scorer</title>
+
+  <!-- React + ReactDOM from CDN -->
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <!-- Babel for in-browser JSX transform -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: 'Georgia', 'Times New Roman', serif;
+      background: #0d1a26;
+      color: #ddd5c5;
+      min-height: 100vh;
+    }
+    input { font-family: inherit; }
+    button { font-family: inherit; }
+
+    /* Scrollbar styling */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #0d1a26; }
+    ::-webkit-scrollbar-thumb { background: #1e2f40; border-radius: 3px; }
+
+    @media (max-width: 700px) {
+      .layout { flex-direction: column !important; }
+      .right-panel { position: static !important; }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState } = React;
+
+    // ── Data ────────────────────────────────────────────────────────────────
+    const CRITERIA = {
+      location: {
+        label: "Location", icon: "📍",
+        options: [
+          { label: "Dartmouth Lancaster", value: 10 },
+          { label: "Halifax West",        value: 8  },
+          { label: "Dartmouth North",     value: 8  },
+          { label: "Dartmouth Downtown",  value: 6  },
+          { label: "Halifax North",       value: 5  },
+          { label: "Halifax",             value: 3  },
+        ],
+      },
+      orientation: {
+        label: "Orientation", icon: "🧭",
+        options: [
+          { label: "South-facing", value: 10 },
+          { label: "East-facing",  value: 5  },
+          { label: "West-facing",  value: 5  },
+          { label: "North-facing", value: -5 },
+        ],
+      },
+      power: {
+        label: "Power Source", icon: "⚡",
+        options: [
+          { label: "Dual: Electricity & Propane", value: 10 },
+          { label: "Dual: Electricity & Oil",     value: 7  },
+          { label: "Oil only",                    value: 5  },
+          { label: "Solely Electricity",          value: 0  },
+        ],
+      },
+      heating: {
+        label: "Heating", icon: "🔥",
+        options: [
+          { label: "Electricity + Propane Fireplace", value: 10 },
+          { label: "Electricity + Heat Pump",         value: 7  },
+          { label: "Electricity only",                value: 0  },
+        ],
+      },
+      driveway: {
+        label: "Driveway", icon: "🚗",
+        options: [
+          { label: "Paved",     value: 10 },
+          { label: "Pavers",    value: 7  },
+          { label: "Gravelled", value: 5  },
+        ],
+      },
+      garage: {
+        label: "Garage", icon: "🏠",
+        options: [
+          { label: "Double Attached", value: 10 },
+          { label: "Double",          value: 8  },
+          { label: "Single Attached", value: 5  },
+          { label: "Single",          value: 3  },
+        ],
+      },
+      fence: {
+        label: "Fence", icon: "🌿",
+        options: [
+          { label: "Wood Fence",  value: 7  },
+          { label: "Chain Link",  value: 3  },
+          { label: "No Fence",    value: -5 },
+        ],
+      },
+      roof: {
+        label: "Roof Last Updated", icon: "🏗️",
+        options: [
+          { label: "Within 1 year",   value: 10 },
+          { label: "Within 5 years",  value: 7  },
+          { label: "Within 8 years",  value: 5  },
+          { label: "Around 10 years", value: 1  },
+        ],
+      },
+      fireplace: {
+        label: "Fireplace", icon: "🕯️",
+        options: [
+          { label: "Propane Fireplace", value: 5  },
+          { label: "Conventional",      value: 3  },
+          { label: "Electric",          value: 3  },
+          { label: "None",              value: -5 },
+        ],
+      },
+    };
+
+    const BASE_PRICE  = 580000;
+    const MAX_SCORE   = 82;   // sum of all top options
+    const MIN_SCORE   = -15;  // sum of all bottom options
+
+    // ── Helpers ─────────────────────────────────────────────────────────────
+    function formatCAD(n) {
+      return "$" + Math.round(n).toLocaleString("en-CA");
+    }
+
+    function getColor(pct) {
+      if (pct >= 80) return "#5cb85c";
+      if (pct >= 60) return "#a8c44a";
+      if (pct >= 40) return "#f0a500";
+      return "#e05555";
+    }
+
+    function getLabel(pct, answered, total) {
+      if (answered < total) return `${answered} of ${total} answered`;
+      if (pct >= 80) return "Excellent Match";
+      if (pct >= 60) return "Good Match";
+      if (pct >= 40) return "Fair Match";
+      return "Below Average";
+    }
+
+    // ── Main App ─────────────────────────────────────────────────────────────
+    function App() {
+      const [address,   setAddress]   = useState("");
+      const [listPrice, setListPrice] = useState("");
+      const [scores,    setScores]    = useState({});
+      const [saved,     setSaved]     = useState([]);
+
+      const totalScore = Object.values(scores).reduce((s, v) => s + v, 0);
+      const answered   = Object.keys(scores).length;
+      const total      = Object.keys(CRITERIA).length;
+
+      const normalized = Math.max(0, Math.min(1, (totalScore - MIN_SCORE) / (MAX_SCORE - MIN_SCORE)));
+      const offerPct   = 0.83 + normalized * 0.19;
+      const pct        = normalized * 100;
+      const color      = getColor(pct);
+
+      const entered       = parseFloat((listPrice || "").replace(/,/g, "")) || null;
+      const baseOffer     = Math.round((BASE_PRICE * offerPct) / 1000) * 1000;
+      const adjustedOffer = entered ? Math.round((entered * offerPct) / 1000) * 1000 : null;
+      const displayOffer  = adjustedOffer || baseOffer;
+
+      const circumference = 2 * Math.PI * 52;
+      const dash = (Math.min(100, pct) / 100) * circumference;
+
+      function handleSave() {
+        if (!address) return;
+        setSaved(prev => [{
+          address,
+          score:  totalScore,
+          pct:    Math.round(pct),
+          offer:  displayOffer,
+          list:   entered,
+          label:  getLabel(pct, answered, total),
+          color,
+          date:   new Date().toLocaleDateString("en-CA"),
+        }, ...prev]);
+        setAddress("");
+        setListPrice("");
+        setScores({});
+      }
+
+      return (
+        <div>
+          {/* ── Header ── */}
+          <header style={hdr.wrap}>
+            <div style={hdr.left}>
+              <div style={hdr.badge}>HRM</div>
+              <div>
+                <div style={hdr.title}>House Hunt Scorer</div>
+                <div style={hdr.sub}>Halifax · Dartmouth Region</div>
+              </div>
+            </div>
+            <div style={hdr.chip}>
+              2-yr avg sold price &nbsp;<strong style={{ color: "#c9a84c" }}>$547K – $580K</strong>
+            </div>
+          </header>
+
+          {/* ── Body ── */}
+          <div className="layout" style={body.layout}>
+
+            {/* Left — criteria */}
+            <div style={body.left}>
+
+              {/* Property info */}
+              <Card title="🏡 Property Details">
+                <input
+                  style={el.input}
+                  placeholder="Address (e.g. 42 Maple Dr, Dartmouth)"
+                  value={address}
+                  onChange={e => setAddress(e.target.value)}
+                />
+                <input
+                  style={el.input}
+                  placeholder="Listing price in CAD (optional)"
+                  value={listPrice}
+                  onChange={e => setListPrice(e.target.value)}
+                />
+              </Card>
+
+              {/* Criteria */}
+              {Object.entries(CRITERIA).map(([key, cat]) => (
+                <Card key={key} title={`${cat.icon} ${cat.label}`} badge={
+                  scores[key] !== undefined
+                    ? <span style={{ color: scores[key] > 0 ? "#5cb85c" : scores[key] < 0 ? "#e05555" : "#888", fontFamily: "monospace", fontWeight: "bold" }}>
+                        {scores[key] > 0 ? `+${scores[key]}` : scores[key]}
+                      </span>
+                    : null
+                }>
+                  {cat.options.map(opt => {
+                    const sel = scores[key] === opt.value;
+                    return (
+                      <button
+                        key={opt.label}
+                        onClick={() => setScores(p => ({ ...p, [key]: opt.value }))}
+                        style={{ ...el.optBtn, ...(sel ? el.optBtnSel : {}) }}
+                      >
+                        <span style={{ fontSize: 12 }}>{opt.label}</span>
+                        <span style={{ fontSize: 12, fontFamily: "monospace", fontWeight: "bold", color: opt.value > 0 ? "#5cb85c" : opt.value < 0 ? "#e05555" : "#667" }}>
+                          {opt.value > 0 ? `+${opt.value}` : opt.value}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </Card>
+              ))}
+
+              <button
+                onClick={handleSave}
+                disabled={!address}
+                style={{ ...el.saveBtn, opacity: address ? 1 : 0.4, cursor: address ? "pointer" : "default" }}
+              >
+                💾 Save Property
+              </button>
+            </div>
+
+            {/* Right — score + offer */}
+            <div className="right-panel" style={body.right}>
+
+              {/* Gauge */}
+              <Card title="📊 Score">
+                <div style={{ display: "flex", justifyContent: "center", marginBottom: 6 }}>
+                  <svg width="130" height="130" viewBox="0 0 130 130">
+                    <circle cx="65" cy="65" r="52" fill="none" stroke="#1e2e3e" strokeWidth="10" />
+                    <circle
+                      cx="65" cy="65" r="52"
+                      fill="none"
+                      stroke={answered === 0 ? "#2a3a4a" : color}
+                      strokeWidth="10"
+                      strokeLinecap="round"
+                      strokeDasharray={`${answered === 0 ? 0 : dash} ${circumference}`}
+                      transform="rotate(-90 65 65)"
+                      style={{ transition: "stroke-dasharray 0.5s ease, stroke 0.3s" }}
+                    />
+                    <text x="65" y="60" textAnchor="middle" fill={answered === 0 ? "#445" : color} fontSize="28" fontWeight="bold" fontFamily="Georgia">
+                      {answered === 0 ? "—" : totalScore}
+                    </text>
+                    <text x="65" y="78" textAnchor="middle" fill="#556677" fontSize="11" fontFamily="Georgia">
+                      / {MAX_SCORE}
+                    </text>
+                  </svg>
+                </div>
+                <div style={{ textAlign: "center", fontSize: 14, fontWeight: "bold", color: answered === 0 ? "#556" : color, marginBottom: 8 }}>
+                  {getLabel(pct, answered, total)}
+                </div>
+
+                {answered > 0 && Object.entries(CRITERIA).map(([key, cat]) => {
+                  const v = scores[key];
+                  if (v === undefined) return null;
+                  const maxV = Math.max(...cat.options.map(o => o.value));
+                  const barPct = maxV > 0 ? Math.max(0, v / maxV) * 100 : 0;
+                  return (
+                    <div key={key} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                      <span style={{ fontSize: 13, width: 20 }}>{cat.icon}</span>
+                      <div style={{ flex: 1, height: 4, background: "#1e2f40", borderRadius: 2, overflow: "hidden" }}>
+                        <div style={{
+                          height: "100%", borderRadius: 2,
+                          width: `${barPct}%`,
+                          background: v < 0 ? "#e05555" : v === 0 ? "#445" : color,
+                          transition: "width 0.4s ease, background 0.3s",
+                        }} />
+                      </div>
+                      <span style={{ fontSize: 10, fontFamily: "monospace", fontWeight: "bold", width: 24, textAlign: "right", color: v > 0 ? "#5cb85c" : v < 0 ? "#e05555" : "#667" }}>
+                        {v > 0 ? `+${v}` : v}
+                      </span>
+                    </div>
+                  );
+                })}
+              </Card>
+
+              {/* Offer */}
+              <Card title="💰 Suggested Offer">
+                <div style={{ fontSize: 30, fontWeight: "bold", color: "#c9a84c", marginBottom: 2 }}>
+                  {formatCAD(displayOffer)}
+                </div>
+                <div style={{ fontSize: 11, color: "#556677", marginBottom: 6 }}>
+                  {Math.round(offerPct * 100)}% of market value
+                </div>
+
+                {entered && (
+                  <>
+                    <div style={{ height: 1, background: "#1e2f40", margin: "10px 0" }} />
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 6 }}>
+                      <span style={{ color: "#667788" }}>List Price</span>
+                      <span style={{ fontFamily: "monospace" }}>{formatCAD(entered)}</span>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 6 }}>
+                      <span style={{ color: "#667788" }}>Difference</span>
+                      <span style={{ fontFamily: "monospace", fontWeight: "bold", color: adjustedOffer < entered ? "#5cb85c" : "#e05555" }}>
+                        {adjustedOffer < entered
+                          ? `${formatCAD(entered - adjustedOffer)} under list`
+                          : `${formatCAD(adjustedOffer - entered)} over list`}
+                      </span>
+                    </div>
+                  </>
+                )}
+
+                <div style={{ fontSize: 10, color: "#445566", lineHeight: 1.6, marginTop: 10, borderTop: "1px solid #1e2f40", paddingTop: 10 }}>
+                  Based on HRM 2-year sold avg ($547K–$580K).<br />
+                  Score adjusts offer ±19% from market baseline.
+                </div>
+              </Card>
+
+              {/* Saved */}
+              {saved.length > 0 && (
+                <Card title="🗂 Saved Properties">
+                  {saved.map((h, i) => (
+                    <div key={i} style={{ borderBottom: i < saved.length - 1 ? "1px solid #1e2f40" : "none", paddingBottom: 10, marginBottom: 10 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                        <div style={{ fontSize: 12, color: "#ddd5c5", flex: 1, marginRight: 8 }}>{h.address}</div>
+                        <div style={{ fontSize: 18, fontWeight: "bold", fontFamily: "monospace", color: h.color }}>{h.score}</div>
+                      </div>
+                      <div style={{ fontSize: 11, color: "#667788", marginTop: 3, display: "flex", flexWrap: "wrap", gap: 4 }}>
+                        <span style={{ color: h.color }}>{h.label}</span>
+                        <span style={{ color: "#334455" }}>·</span>
+                        <span>Offer: <strong style={{ color: "#c9a84c" }}>{formatCAD(h.offer)}</strong></span>
+                        {h.list && <><span style={{ color: "#334455" }}>·</span><span>List: {formatCAD(h.list)}</span></>}
+                      </div>
+                      <div style={{ fontSize: 10, color: "#334455", marginTop: 2 }}>{h.date}</div>
+                    </div>
+                  ))}
+                </Card>
+              )}
+
+            </div>
+          </div>
+
+          <footer style={{ textAlign: "center", padding: "24px 16px", fontSize: 10, color: "#223344", borderTop: "1px solid #1e2f40" }}>
+            HRM House Hunt Scorer · For personal use only · Not financial advice · Based on NSAR/REMAX HRM data 2023–2024
+          </footer>
+        </div>
+      );
+    }
+
+    // ── Card component ───────────────────────────────────────────────────────
+    function Card({ title, badge, children }) {
+      return (
+        <div style={el.card}>
+          <div style={el.cardTitle}>
+            {title}
+            {badge && <span style={{ marginLeft: "auto" }}>{badge}</span>}
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            {children}
+          </div>
+        </div>
+      );
+    }
+
+    // ── Styles ───────────────────────────────────────────────────────────────
+    const hdr = {
+      wrap: {
+        background: "linear-gradient(135deg, #152030 0%, #0d1a26 100%)",
+        borderBottom: "1px solid #c9a84c33",
+        padding: "14px 22px",
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        flexWrap: "wrap", gap: 10,
+        position: "sticky", top: 0, zIndex: 10,
+      },
+      left:  { display: "flex", alignItems: "center", gap: 14 },
+      badge: {
+        width: 42, height: 42, borderRadius: 8,
+        background: "linear-gradient(135deg, #c9a84c, #7a5c10)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        fontWeight: "bold", fontSize: 13, color: "#fff", letterSpacing: 1,
+      },
+      title: { fontSize: 20, color: "#ddd5c5", letterSpacing: 0.5 },
+      sub:   { fontSize: 11, color: "#c9a84c", letterSpacing: 2, textTransform: "uppercase", marginTop: 1 },
+      chip:  { fontSize: 12, color: "#8899aa", background: "#ffffff0d", border: "1px solid #ffffff15", padding: "5px 13px", borderRadius: 20 },
+    };
+
+    const body = {
+      layout: { display: "flex", gap: 16, padding: 16, maxWidth: 1060, margin: "0 auto", alignItems: "flex-start", flexWrap: "wrap" },
+      left:   { flex: "1 1 400px", display: "flex", flexDirection: "column", gap: 12 },
+      right:  { flex: "0 1 290px", display: "flex", flexDirection: "column", gap: 12, position: "sticky", top: 72, maxHeight: "calc(100vh - 80px)", overflowY: "auto" },
+    };
+
+    const el = {
+      card: {
+        background: "#152030",
+        borderRadius: 12,
+        padding: "13px 15px",
+        border: "1px solid #1e2f40",
+      },
+      cardTitle: {
+        fontSize: 11, fontWeight: "bold", color: "#c9a84c",
+        letterSpacing: 1.5, textTransform: "uppercase",
+        marginBottom: 10, display: "flex", alignItems: "center", gap: 6,
+      },
+      input: {
+        width: "100%", background: "#0d1a26",
+        border: "1px solid #1e2f40", borderRadius: 8,
+        padding: "8px 11px", color: "#ddd5c5", fontSize: 13,
+        outline: "none", fontFamily: "Georgia, serif",
+      },
+      optBtn: {
+        display: "flex", justifyContent: "space-between", alignItems: "center",
+        background: "#0d1a26", border: "1px solid #1e2f40", borderRadius: 7,
+        padding: "7px 10px", cursor: "pointer", color: "#ddd5c5",
+        transition: "border-color 0.15s, background 0.15s", width: "100%", textAlign: "left",
+      },
+      optBtnSel: { background: "#1a2d40", borderColor: "#c9a84c", boxShadow: "0 0 0 1px #c9a84c22" },
+      saveBtn: {
+        background: "linear-gradient(135deg, #c9a84c, #7a5c10)",
+        border: "none", borderRadius: 10, padding: "12px 20px",
+        color: "#fff", fontSize: 14, fontWeight: "bold",
+        letterSpacing: 0.5, width: "100%", transition: "opacity 0.2s",
+      },
+    };
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
