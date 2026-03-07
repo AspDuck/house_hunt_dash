@@ -1,2 +1,6 @@
-# house_hunt_dash
-Scoring dash for house hunt
+house-hunt-dashboard/
+  package.json
+  index.html
+  src/
+    main.jsx
+    App.jsx
